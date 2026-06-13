@@ -1,27 +1,77 @@
-"""Phase 2 — Grammar + clarity feedback via an LLM.
+"""Phase 2 — Grammar + clarity feedback via an LLM (Anthropic or OpenAI)."""
+from __future__ import annotations
 
-Provider is pluggable (settings.llm_provider): "anthropic" (default) or "openai".
-Send the transcript text, get back structured corrections + a clarity rating.
+import json
 
-IMPLEMENTATION NOTES (for the dev session):
-  - Prompt the model to return STRICT JSON matching LanguageReport:
-        { "corrected_text": str,
-          "grammar_issues": [{ "original", "suggestion", "explanation" }],
-          "clarity": { "score": 0-100, "summary", "suggestions": [str] } }
-    Use a system prompt that frames the model as an ESL speaking coach for a
-    non-native speaker aiming at clear, natural American English.
-  - Parse JSON defensively; if parsing fails, retry once asking for JSON only.
-  - Keep the provider behind a small dispatch so swapping is one setting.
-"""
 from app.config import settings
-from app.models.schemas import LanguageReport
+from app.models.schemas import ClarityFeedback, GrammarIssue, LanguageReport
+
+_SYSTEM = (
+    "You are an ESL speaking coach helping a non-native English speaker improve "
+    "toward clear, natural American English. Analyse the spoken transcript below "
+    "for grammar mistakes and overall clarity. "
+    "Return ONLY a JSON object — no prose, no markdown — with this exact shape:\n"
+    '{"corrected_text": "<full corrected transcript>", '
+    '"grammar_issues": [{"original": "<wrong phrase>", "suggestion": "<correct phrase>", "explanation": "<brief reason>"}], '
+    '"clarity": {"score": <0-100>, "summary": "<one sentence>", "suggestions": ["<tip>", ...]}}'
+)
+
+
+def _parse(raw: str) -> LanguageReport:
+    """Parse model output to LanguageReport, stripping markdown fences."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1]
+        text = text.rsplit("```", 1)[0]
+    data = json.loads(text)
+    return LanguageReport(
+        corrected_text=data["corrected_text"],
+        grammar_issues=[GrammarIssue(**g) for g in data.get("grammar_issues", [])],
+        clarity=ClarityFeedback(**data["clarity"]),
+    )
+
+
+def _call_anthropic(text: str) -> str:
+    import anthropic as _anthropic
+    client = _anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    msg = client.messages.create(
+        model=settings.anthropic_model,
+        max_tokens=1024,
+        system=_SYSTEM,
+        messages=[{"role": "user", "content": text}],
+    )
+    return msg.content[0].text
+
+
+def _call_openai(text: str) -> str:
+    import openai as _openai
+    client = _openai.OpenAI(api_key=settings.openai_api_key)
+    resp = client.chat.completions.create(
+        model=settings.openai_model,
+        max_tokens=1024,
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": text},
+        ],
+    )
+    return resp.choices[0].message.content
 
 
 def analyze(text: str) -> LanguageReport:
-    """Run grammar + clarity analysis on transcript text.
-
-    TODO(Phase 2): implement. Dispatch on settings.llm_provider.
-    """
-    raise NotImplementedError(
-        "Implement LLM grammar/clarity analysis. See docstring + docs/spec.html (Phase 2)."
+    """Run grammar + clarity analysis on transcript text."""
+    raw = (
+        _call_anthropic(text)
+        if settings.llm_provider == "anthropic"
+        else _call_openai(text)
     )
+    try:
+        return _parse(raw)
+    except (json.JSONDecodeError, KeyError):
+        # retry once asking model to return only JSON
+        retry_prompt = f"Return ONLY the JSON, no commentary:\n{text}"
+        raw2 = (
+            _call_anthropic(retry_prompt)
+            if settings.llm_provider == "anthropic"
+            else _call_openai(retry_prompt)
+        )
+        return _parse(raw2)

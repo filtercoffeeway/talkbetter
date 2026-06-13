@@ -11,8 +11,7 @@ Build order (see docs/spec.html):
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.models.schemas import AnalysisResponse
-from app.services import filler_pace, storage, transcription
-# from app.services import llm_feedback      # Phase 2
+from app.services import filler_pace, llm_feedback, storage, transcription
 # from app.services import pronunciation     # Phase 3
 
 router = APIRouter()
@@ -32,8 +31,9 @@ async def analyze(
 
     response = AnalysisResponse(transcript=transcript, pace_fillers=pace)
 
-    # --- Phase 2 (uncomment when implemented) ---
-    # response.language = llm_feedback.analyze(transcript.text)
+    # --- Phase 2 ---
+    if transcript.text.strip():
+        response.language = llm_feedback.analyze(transcript.text)
 
     # --- Phase 3 (uncomment when implemented) ---
     # if reference_text:
