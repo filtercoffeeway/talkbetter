@@ -16,6 +16,10 @@ from app.routers import analysis, history, profiles
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    llm_key = settings.anthropic_api_key if settings.llm_provider == "anthropic" else settings.openai_api_key
+    print(f"  Phase 1 (transcription/pace):  ON  [whisper={settings.whisper_model}]")
+    print(f"  Phase 2 (grammar/clarity LLM): {'ON ' if llm_key else 'OFF — set ANTHROPIC_API_KEY in backend/.env'}")
+    print(f"  Phase 3 (accent/Azure):        {'ON ' if settings.azure_speech_key else 'OFF — set AZURE_SPEECH_KEY in backend/.env'}")
     yield
 
 

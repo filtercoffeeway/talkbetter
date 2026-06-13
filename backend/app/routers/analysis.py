@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from app.config import settings
 from app.models.schemas import AnalysisResponse
 from app.services import filler_pace, llm_feedback, pronunciation, storage, transcription
 
@@ -32,12 +33,17 @@ async def analyze(
 
     response = AnalysisResponse(transcript=transcript, pace_fillers=pace)
 
-    # --- Phase 2 ---
-    if transcript.text.strip():
+    # --- Phase 2 (skipped if no LLM key is configured) ---
+    llm_key = (
+        settings.anthropic_api_key
+        if settings.llm_provider == "anthropic"
+        else settings.openai_api_key
+    )
+    if transcript.text.strip() and llm_key:
         response.language = llm_feedback.analyze(transcript.text)
 
-    # --- Phase 3 ---
-    if reference_text:
+    # --- Phase 3 (skipped if no Azure key or no reference text) ---
+    if reference_text and settings.azure_speech_key:
         src_suffix = Path(audio.filename).suffix if audio.filename else ".webm"
         response.accent = pronunciation.assess(audio_bytes, reference_text, src_suffix)
 
