@@ -1,0 +1,19 @@
+# --- Web framework ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9        # multipart form uploads (audio files)
+pydantic==2.9.2
+pydantic-settings==2.5.2       # .env loading via BaseSettings
+
+# --- Phase 1: transcription + pace/filler (local, no API key) ---
+faster-whisper==1.0.3          # local Whisper, word-level timestamps
+
+# --- Phase 2: grammar + clarity feedback (LLM) ---
+anthropic==0.39.0              # default LLM provider (Claude); swappable
+# openai==1.51.0               # uncomment if switching LLM_PROVIDER=openai
+
+# --- Phase 3: American-accent scoring ---
+azure-cognitiveservices-speech==1.40.0   # Azure Pronunciation Assessment
+
+# --- Utilities ---
+python-dotenv==1.0.1

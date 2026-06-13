@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TalkBetter — Build Specification</title>
+<style>
+  :root {
+    --bg:#0f1117; --panel:#171a22; --panel2:#1d212c; --text:#e8eaf0; --muted:#9aa0b0;
+    --accent:#6c8cff; --green:#46c08a; --amber:#e0a93b; --line:#2a2e3a; --code:#0b0d13;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; line-height:1.6; }
+  .wrap { max-width:920px; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+  h1 { font-size:2.2rem; margin:0 0 .3rem; }
+  h2 { font-size:1.5rem; margin:2.6rem 0 .8rem; padding-bottom:.4rem; border-bottom:1px solid var(--line); }
+  h3 { font-size:1.15rem; margin:1.6rem 0 .5rem; color:var(--accent); }
+  h4 { margin:1.1rem 0 .3rem; }
+  p, li { color:#d7dae3; }
+  .lede { color:var(--muted); font-size:1.05rem; }
+  a { color:var(--accent); }
+  code { background:var(--code); padding:.12em .4em; border-radius:5px; font-size:.9em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:10px;
+    padding:1rem 1.1rem; overflow-x:auto; }
+  pre code { background:none; padding:0; }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.95rem; }
+  th,td { border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top; }
+  th { background:var(--panel2); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:1.1rem 1.3rem; margin:1rem 0; }
+  .phase { border-left:4px solid var(--accent); }
+  .pill { display:inline-block; font-size:.72rem; font-weight:700; letter-spacing:.04em;
+    padding:.18em .6em; border-radius:999px; text-transform:uppercase; }
+  .pill.local { background:rgba(70,192,138,.15); color:var(--green); border:1px solid var(--green); }
+  .pill.key { background:rgba(224,169,59,.15); color:var(--amber); border:1px solid var(--amber); }
+  .tag { color:var(--muted); font-size:.85rem; }
+  .ac { background:var(--panel2); border-radius:8px; padding:.8rem 1rem; margin:.7rem 0; }
+  .ac strong { color:var(--green); }
+  ul.tight { margin:.3rem 0; }
+  .toc a { display:block; padding:.15rem 0; }
+  .muted { color:var(--muted); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  @media (max-width:680px){ .grid{ grid-template-columns:1fr; } }
+  .flow { font-family:ui-monospace,monospace; font-size:.85rem; white-space:pre; color:#cfd3dd; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>TalkBetter — Build Specification</h1>
+<p class="lede">A local app that helps a non-native speaker improve spoken English:
+fewer filler words, better pace, correct grammar, clearer communication, and a more
+American accent. This document is self-contained: an engineer (or an independent Claude
+session) should be able to build the app end to end from it.</p>
+<p class="tag">Version 0.1 · Status: scaffolded, awaiting implementation · Owner: Mahesh</p>
+
+<div class="panel">
+  <strong>How to use this doc:</strong> Build in phase order (1 → 4). Each phase ends with
+  <em>acceptance criteria</em> — do not move on until they pass. Phase 1 runs fully local with
+  no API keys, so you get a working loop before signing up for anything. The repo is already
+  scaffolded with stub modules whose docstrings point back to the relevant phase here.
+</div>
+
+<h2 id="toc">Contents</h2>
+<div class="toc">
+  <a href="#overview">1. Overview & goals</a>
+  <a href="#stack">2. Tech stack</a>
+  <a href="#architecture">3. Architecture & data flow</a>
+  <a href="#structure">4. Repository structure</a>
+  <a href="#contract">5. API contract</a>
+  <a href="#env">6. Environment & configuration</a>
+  <a href="#setup">7. Local setup & run</a>
+  <a href="#phase1">8. Phase 1 — Transcription + pace + fillers</a>
+  <a href="#phase2">9. Phase 2 — Grammar + clarity (LLM)</a>
+  <a href="#phase3">10. Phase 3 — American accent (Azure)</a>
+  <a href="#phase4">11. Phase 4 — Progress tracking & polish</a>
+  <a href="#future">12. Future / out of scope</a>
+</div>
+
+<!-- ============================================================= -->
+<h2 id="overview">1. Overview & goals</h2>
+<p>TalkBetter records the user speaking, then returns structured feedback across four
+dimensions. The user runs it on their own machine; their audio never has to leave it
+except for the optional cloud calls in Phases 2–3.</p>
+
+<table>
+  <tr><th>Goal</th><th>What "done" looks like</th><th>Difficulty</th><th>Phase</th></tr>
+  <tr><td>Reduce filler words</td><td>Counts of "um/uh/like/you know" etc. with a per-minute rate</td><td>Easy</td><td>1</td></tr>
+  <tr><td>Better pace & pauses</td><td>Words-per-minute + count of long silences</td><td>Easy</td><td>1</td></tr>
+  <tr><td>Correct grammar</td><td>Corrected transcript + list of fixes with explanations</td><td>Medium</td><td>2</td></tr>
+  <tr><td>Clearer communication</td><td>Clarity score + concrete rephrase suggestions</td><td>Medium</td><td>2</td></tr>
+  <tr><td>American accent</td><td>Phoneme-level pronunciation scores; flagged problem words</td><td>Hard</td><td>3</td></tr>
+</table>
+
+<p><strong>Two interaction modes</strong> (both already stubbed in <code>App.jsx</code>):</p>
+<ul>
+  <li><strong>Free speaking</strong> — user talks about anything. Drives Phases 1 & 2.</li>
+  <li><strong>Accent practice</strong> — user reads a known reference sentence aloud. Required for
+  Phase 3, because Azure pronunciation scoring is reference-based (it compares what was said
+  to expected text).</li>
+</ul>
+
+<!-- ============================================================= -->
+<h2 id="stack">2. Tech stack</h2>
+<table>
+  <tr><th>Layer</th><th>Choice</th><th>Why</th></tr>
+  <tr><td>Frontend</td><td>React + Vite</td><td>Component model gives room to extend; Vite is fast and proxies to the API in dev.</td></tr>
+  <tr><td>Audio capture</td><td>Browser <code>MediaRecorder</code></td><td>Zero install, produces webm/opus blobs.</td></tr>
+  <tr><td>Backend</td><td>FastAPI (Python) + Uvicorn</td><td>Async, typed, trivial file uploads, auto OpenAPI docs at <code>/docs</code>.</td></tr>
+  <tr><td>Transcription</td><td>faster-whisper</td><td>Local, free, word-level timestamps; no API key.</td></tr>
+  <tr><td>Grammar/clarity</td><td>LLM (Claude default, OpenAI swappable)</td><td>Strong at ESL correction + structured JSON output.</td></tr>
+  <tr><td>Accent</td><td>Azure Pronunciation Assessment</td><td>Phoneme-level scores out of the box; free tier exists.</td></tr>
+  <tr><td>Audio transcode</td><td>ffmpeg</td><td>Convert webm/opus → 16kHz mono WAV for Whisper/Azure.</td></tr>
+</table>
+<p class="muted">Pinned versions live in <code>backend/requirements.txt</code> and
+<code>frontend/package.json</code>. ffmpeg must be installed on the host (<code>brew install ffmpeg</code>).</p>
+
+<!-- ============================================================= -->
+<h2 id="architecture">3. Architecture & data flow</h2>
+<div class="panel">
+<div class="flow">
+Browser (React)                         FastAPI backend
+─────────────────                       ────────────────────────────────
+ Recorder ──▶ audio Blob (webm)
+        │
+        ▼  POST /api/analyze  (multipart: audio[, reference_text])
+        │
+        └──────────────────────────────▶ routers/analysis.py
+                                            │
+                                   ┌────────┼─────────────────────────────┐
+                                   ▼        ▼                ▼             ▼
+                          transcription  filler_pace   llm_feedback   pronunciation
+                          (Whisper)      (pure py)     (Phase 2)      (Phase 3, Azure)
+                                   │        │                │             │
+                                   └────────┴───────┬────────┴─────────────┘
+                                                    ▼
+                                       AnalysisResponse (JSON)
+        ┌───────────────────────────────────────────┘
+        ▼
+ FeedbackReport renders sections that are present
+</div>
+</div>
+<p>The endpoint is additive: Phase 1 returns <code>transcript</code> + <code>pace_fillers</code>;
+later phases populate <code>language</code> and <code>accent</code>. The frontend renders whatever
+sections are non-null, so partially-built backends still work.</p>
+
+<!-- ============================================================= -->
+<h2 id="structure">4. Repository structure</h2>
+<pre><code>TalkBetter/
+├── CLAUDE.md                  # context for AI sessions (read first)
+├── README.md                  # human quick-start
+├── docs/spec.html             # this file
+├── .gitignore
+├── backend/
+│   ├── requirements.txt
+│   ├── .env.example           # copy to .env
+│   └── app/
+│       ├── main.py            # FastAPI app + CORS + router mount
+│       ├── config.py          # Settings (pydantic-settings, reads .env)
+│       ├── routers/analysis.py        # POST /api/analyze orchestration
+│       ├── services/
+│       │   ├── transcription.py       # Phase 1  (Whisper)        [stub]
+│       │   ├── filler_pace.py         # Phase 1  (pure python)    [stub]
+│       │   ├── llm_feedback.py        # Phase 2  (LLM)            [stub]
+│       │   └── pronunciation.py       # Phase 3  (Azure)          [stub]
+│       └── models/schemas.py          # Pydantic response models (API contract)
+│   └── tests/test_filler_pace.py      # Phase 1 unit tests (skipped until impl)
+├── frontend/
+│   ├── package.json · vite.config.js · index.html
+│   └── src/
+│       ├── main.jsx · App.jsx · styles.css
+│       ├── components/Recorder.jsx        # MediaRecorder capture
+│       ├── components/FeedbackReport.jsx  # renders AnalysisResponse
+│       └── lib/api.js                     # fetch wrapper
+└── data/recordings/           # local-only; gitignored
+</code></pre>
+<p class="muted">Every <code>[stub]</code> raises <code>NotImplementedError</code> and has a
+docstring describing exactly what to build. Implement them in phase order.</p>
+
+<!-- ============================================================= -->
+<h2 id="contract">5. API contract</h2>
+<h3>POST <code>/api/analyze</code></h3>
+<p><strong>Request</strong> — <code>multipart/form-data</code>:</p>
+<table>
+  <tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr>
+  <tr><td><code>audio</code></td><td>file</td><td>yes</td><td>webm/opus from MediaRecorder (or wav/mp3)</td></tr>
+  <tr><td><code>reference_text</code></td><td>string</td><td>no</td><td>Present only in accent mode; triggers Phase 3 scoring</td></tr>
+  <tr><td><code>profile_id</code></td><td>int</td><td>no</td><td>Phase 4. If given, the session is saved under that profile and the response includes <code>session_id</code>. Omit for a one-off, non-persisted analysis.</td></tr>
+</table>
+<p><strong>Response</strong> — <code>application/json</code>, shape defined authoritatively in
+<code>backend/app/models/schemas.py</code>. Summary:</p>
+<pre><code>{
+  "transcript":   { "text": str, "words": [{word,start,end}], "duration_sec": float },
+  "pace_fillers": { "words_per_minute": float, "total_words": int, "duration_sec": float,
+                    "long_pauses": int, "fillers": [{word,count}],
+                    "filler_total": int, "filler_rate_per_min": float },
+  "language":     null | { "corrected_text": str,
+                           "grammar_issues": [{original,suggestion,explanation}],
+                           "clarity": { "score": 0-100, "summary": str, "suggestions": [str] } },
+  "accent":       null | { "accuracy_score","fluency_score","completeness_score","pron_score": float,
+                           "problem_words": [{word,accuracy,error_type,phonemes:[{phoneme,accuracy}]}] },
+  "session_id":   null | int            // Phase 4: set when profile_id was supplied
+}</code></pre>
+
+<h3>Phase 4 — profiles &amp; progress <span class="pill local">No API key</span></h3>
+<p>Multiple people share one local install via named <strong>profiles</strong> (no auth — local, trusted).
+Each analyzed recording is persisted under a profile in a local SQLite DB (<code>data/talkbetter.db</code>,
+stdlib <code>sqlite3</code>, gitignored). Names are unique case-insensitively.</p>
+<table>
+  <tr><th>Endpoint</th><th>Purpose</th></tr>
+  <tr><td><code>GET /api/profiles</code></td><td>List profiles with <code>session_count</code>.</td></tr>
+  <tr><td><code>POST /api/profiles</code> <code>{"name": str}</code></td><td>Create (or return existing) profile; 201.</td></tr>
+  <tr><td><code>GET /api/history?profile_id=&lt;id&gt;</code></td><td>That profile's sessions (newest first) + <code>current_streak</code> (consecutive practice days).</td></tr>
+</table>
+<pre><code>// GET /api/history response
+{
+  "profile_id": int,
+  "current_streak": int,                // consecutive days practiced, incl. today/yesterday
+  "sessions": [ { "id","profile_id","created_at","mode","duration_sec","transcript",
+                  "words_per_minute","total_words","long_pauses","filler_total",
+                  "filler_rate_per_min","clarity_score","pron_score" } ]   // newest first
+}</code></pre>
+<p class="muted">Keep <code>schemas.py</code> and this section in lockstep. The frontend trusts these field names.</p>
+
+<!-- ============================================================= -->
+<h2 id="env">6. Environment & configuration</h2>
+<p>All config is read from <code>backend/.env</code> via <code>config.py</code>. Copy
+<code>.env.example</code> → <code>.env</code> and fill in as you reach each phase.</p>
+<table>
+  <tr><th>Variable</th><th>Phase</th><th>Default</th><th>Purpose</th></tr>
+  <tr><td><code>WHISPER_MODEL</code></td><td>1</td><td>base</td><td>tiny→large-v3 (speed vs accuracy)</td></tr>
+  <tr><td><code>WHISPER_DEVICE</code> / <code>WHISPER_COMPUTE_TYPE</code></td><td>1</td><td>cpu / int8</td><td>Use cuda/float16 if you have a GPU</td></tr>
+  <tr><td><code>LLM_PROVIDER</code></td><td>2</td><td>anthropic</td><td>"anthropic" or "openai"</td></tr>
+  <tr><td><code>ANTHROPIC_API_KEY</code> / <code>ANTHROPIC_MODEL</code></td><td>2</td><td>— / claude-sonnet-4-6</td><td>Claude credentials</td></tr>
+  <tr><td><code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code></td><td>2</td><td>— / gpt-4o</td><td>If swapping providers</td></tr>
+  <tr><td><code>AZURE_SPEECH_KEY</code> / <code>AZURE_SPEECH_REGION</code></td><td>3</td><td>—</td><td>Azure Speech resource</td></tr>
+</table>
+
+<!-- ============================================================= -->
+<h2 id="setup">7. Local setup & run</h2>
+<h4>Prerequisites</h4>
+<pre><code># macOS
+brew install python@3.11 node ffmpeg</code></pre>
+<h4>Backend</h4>
+<pre><code>cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # Phase 1 needs no keys
+uvicorn app.main:app --reload # serves on http://127.0.0.1:8000  (docs at /docs)</code></pre>
+<h4>Frontend</h4>
+<pre><code>cd frontend
+npm install
+npm run dev                   # http://localhost:5173  (proxies /api → backend)</code></pre>
+<p class="muted">Open the frontend, allow mic access, record a clip, and you should get
+Phase-1 feedback once <code>transcription.py</code> and <code>filler_pace.py</code> are implemented.</p>
+
+<!-- ============================================================= -->
+<h2 id="phase1">8. Phase 1 — Transcription + pace + fillers <span class="pill local">No API key</span></h2>
+<div class="panel phase">
+<p><strong>Outcome:</strong> Record speech → see a transcript, words-per-minute, long-pause count,
+and filler-word breakdown. Fully local. This is the first end-to-end loop; get it solid before anything else.</p>
+
+<h3>8.1 Transcription — <code>services/transcription.py</code></h3>
+<ul>
+  <li>Lazy-load a single <code>WhisperModel(settings.whisper_model, device=..., compute_type=...)</code>
+  at module import (model load is expensive; do it once).</li>
+  <li>Browser audio is webm/opus. Write the uploaded bytes to a temp file; faster-whisper decodes
+  via its bundled <code>av</code>/ffmpeg. (Optionally transcode to 16kHz mono WAV first for reliability.)</li>
+  <li>Call <code>model.transcribe(path, word_timestamps=True)</code>. Iterate <code>segments</code>, then
+  <code>segment.words</code> → build <code>WordTiming(word, start, end)</code> list.</li>
+  <li>Return <code>Transcript(text=joined, words=[...], duration_sec=info.duration)</code>.</li>
+</ul>
+
+<h3>8.2 Pace & fillers — <code>services/filler_pace.py</code></h3>
+<ul>
+  <li><code>words_per_minute = total_words / (duration_sec/60)</code>.</li>
+  <li>Fillers: case-insensitive count of single-word fillers AND multi-word phrases
+  ("you know", "i mean", "sort of", "kind of") via a sliding window over the token stream.</li>
+  <li><code>long_pauses</code>: walk consecutive words; count gaps where
+  <code>next.start - prev.end &gt; PAUSE_THRESHOLD_SEC</code> (default 1.5s).</li>
+  <li><code>filler_rate_per_min = filler_total / (duration_sec/60)</code> so clips of different
+  lengths are comparable.</li>
+</ul>
+<div class="ac"><strong>Acceptance criteria —</strong>
+<ul class="tight">
+  <li>Recording a clip in the UI returns a populated <code>transcript</code> + <code>pace_fillers</code>.</li>
+  <li>Un-skip and pass <code>backend/tests/test_filler_pace.py</code> (<code>pytest</code>).</li>
+  <li><code>GET /api/health</code> returns <code>{"status":"ok"}</code>; <code>/docs</code> shows the endpoint.</li>
+  <li>No API keys required for any of the above.</li>
+</ul>
+</div>
+</div>
+
+<!-- ============================================================= -->
+<h2 id="phase2">9. Phase 2 — Grammar + clarity <span class="pill key">LLM key</span></h2>
+<div class="panel phase">
+<p><strong>Outcome:</strong> The transcript is corrected, mistakes are listed with short
+explanations, and clarity is scored with actionable rephrase tips.</p>
+<h3>Implementation — <code>services/llm_feedback.py</code></h3>
+<ul>
+  <li>Dispatch on <code>settings.llm_provider</code>; keep provider calls behind one function so swapping is a config change.</li>
+  <li>System prompt: frame the model as an ESL speaking coach for a non-native speaker targeting
+  natural, clear American English. Ask it to be encouraging and specific.</li>
+  <li>Require <strong>strict JSON</strong> matching <code>LanguageReport</code> (corrected_text,
+  grammar_issues[], clarity{score,summary,suggestions[]}). Parse defensively; on failure, retry once
+  asking for JSON only.</li>
+  <li>Wire it into <code>routers/analysis.py</code> (uncomment the Phase 2 line).</li>
+</ul>
+<div class="ac"><strong>Acceptance criteria —</strong>
+<ul class="tight">
+  <li>A clip with deliberate grammar errors returns a sensible <code>corrected_text</code> and ≥1 grammar issue.</li>
+  <li><code>clarity.score</code> is 0–100 with a non-empty summary.</li>
+  <li>Switching <code>LLM_PROVIDER</code> between anthropic/openai works without code changes beyond the key.</li>
+  <li>Malformed model output never 500s the endpoint (graceful fallback).</li>
+</ul>
+</div>
+</div>
+
+<!-- ============================================================= -->
+<h2 id="phase3">10. Phase 3 — American accent <span class="pill key">Azure key</span></h2>
+<div class="panel phase">
+<p><strong>Outcome:</strong> In accent-practice mode, the user reads a reference sentence and gets
+overall + per-word + per-phoneme pronunciation scores, with problem words surfaced.</p>
+<h3>Implementation — <code>services/pronunciation.py</code></h3>
+<ul>
+  <li>Create an Azure Speech resource; put key + region in <code>.env</code>.</li>
+  <li>Transcode the uploaded webm to <strong>16kHz mono PCM WAV</strong> with ffmpeg (Azure requirement).</li>
+  <li>Build <code>PronunciationAssessmentConfig(reference_text, GradingSystem.HundredMark,
+  Granularity.Phoneme, enable_miscue=True)</code> and run recognition.</li>
+  <li>From <code>NBest[0].PronunciationAssessment</code> pull AccuracyScore / FluencyScore /
+  CompletenessScore / PronScore, plus per-word and per-phoneme scores.</li>
+  <li>Flag words with accuracy below a threshold (e.g. &lt;60) as <code>problem_words</code>.</li>
+  <li>Frontend already has accent mode + reference textarea; replace the placeholder with a real
+  sentence bank (categorize by the sounds non-native speakers find hard: th, r/l, v/w, vowel length).</li>
+</ul>
+<div class="ac"><strong>Acceptance criteria —</strong>
+<ul class="tight">
+  <li>Reading the reference sentence returns scores in 0–100 and a problem-word list.</li>
+  <li>Deliberately mispronouncing a word lowers its score and lists it as a problem word.</li>
+  <li>Free-speaking mode (no reference_text) still works and simply omits the accent section.</li>
+</ul>
+</div>
+</div>
+
+<!-- ============================================================= -->
+<h2 id="phase4">11. Phase 4 — Progress tracking & polish <span class="pill local">Optional</span></h2>
+<div class="panel phase">
+<p><strong>Outcome:</strong> The app becomes a practice habit, not a one-shot analyzer.</p>
+<ul>
+  <li>Persist each session (timestamp, scores, filler rate) to a local <code>SQLite</code> DB; add
+  <code>GET /api/history</code>.</li>
+  <li>Frontend dashboard: charts of filler-rate, WPM, clarity, and pron-score over time
+  (Chart.js). Show streaks.</li>
+  <li>Daily practice prompts / sentence-of-the-day; optionally a scheduled reminder.</li>
+  <li>Export a session report (the docx/pdf skills can generate a shareable summary).</li>
+</ul>
+<p class="muted">No new external dependencies required for the core of this phase.</p>
+</div>
+
+<!-- ============================================================= -->
+<h2 id="future">12. Future / out of scope (v1)</h2>
+<ul>
+  <li><strong>Mobile app</strong> — wrap the React frontend with Capacitor/React Native once the
+  web version is proven. Native mic + offline Whisper are the main considerations.</li>
+  <li><strong>Real-time feedback</strong> — streaming transcription / live filler alerts (websockets).</li>
+  <li><strong>Conversation practice</strong> — an LLM role-play partner that also scores you.</li>
+  <li><strong>Multi-user / auth</strong> — only needed if this stops being a personal local tool.</li>
+</ul>
+
+<p class="tag" style="margin-top:3rem">End of specification. Build in order, honor the acceptance
+criteria, and keep <code>schemas.py</code> as the single source of truth for the API shape.</p>
+
+</div>
+</body>
+</html>

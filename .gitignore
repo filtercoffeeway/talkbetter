@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Env / secrets
+.env
+backend/.env
+
+# Node / React
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Whisper model cache (downloaded at runtime)
+models/
+*.bin
+
+# User audio data (do not commit recordings)
+data/recordings/*
+!data/recordings/.gitkeep
+
+# Local progress DB (per-machine, contains personal practice history)
+data/talkbetter.db
+data/*.db
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
