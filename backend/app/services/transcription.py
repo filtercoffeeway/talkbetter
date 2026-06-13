@@ -1,25 +1,54 @@
-"""Phase 1 — Speech-to-text with faster-whisper (local, no API key).
+"""Phase 1 — Speech-to-text with faster-whisper (local, no API key)."""
+from __future__ import annotations
 
-Returns a Transcript with word-level timestamps, which Phase 1's pace/pause
-logic and Phase 3's alignment both depend on.
+import tempfile
+from pathlib import Path
 
-IMPLEMENTATION NOTES (for the dev session):
-  - Lazy-load the WhisperModel once at module level (model load is slow).
-    Use settings.whisper_model / whisper_device / whisper_compute_type.
-  - faster-whisper accepts a file path or file-like object. Browser audio
-    usually arrives as webm/opus; ffmpeg (bundled via faster-whisper's
-    av dependency) decodes it. Write bytes to a temp file if needed.
-  - Call model.transcribe(path, word_timestamps=True). Iterate segments,
-    then segment.words to build WordTiming list. duration_sec = info.duration.
-"""
-from app.models.schemas import Transcript
+from faster_whisper import WhisperModel
+
+from app.config import settings
+from app.models.schemas import Transcript, WordTiming
+
+_model: WhisperModel | None = None
+
+
+def _get_model() -> WhisperModel:
+    global _model
+    if _model is None:
+        _model = WhisperModel(
+            settings.whisper_model,
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+        )
+    return _model
 
 
 def transcribe(audio_bytes: bytes, filename: str | None = None) -> Transcript:
-    """Transcribe audio bytes to text + word timings.
+    """Transcribe audio bytes to text + word timings via faster-whisper."""
+    suffix = Path(filename).suffix if filename else ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
 
-    TODO(Phase 1): implement with faster-whisper. Replace the stub below.
-    """
-    raise NotImplementedError(
-        "Implement faster-whisper transcription. See docstring + docs/spec.html (Phase 1)."
+    try:
+        model = _get_model()
+        segments, info = model.transcribe(
+            tmp_path,
+            word_timestamps=True,
+            vad_filter=True,
+        )
+        words: list[WordTiming] = []
+        text_parts: list[str] = []
+        for seg in segments:
+            text_parts.append(seg.text.strip())
+            if seg.words:
+                for w in seg.words:
+                    words.append(WordTiming(word=w.word.strip(), start=w.start, end=w.end))
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    return Transcript(
+        text=" ".join(text_parts),
+        words=words,
+        duration_sec=info.duration,
     )
