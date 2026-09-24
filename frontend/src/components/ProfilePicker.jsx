@@ -42,7 +42,7 @@ export default function ProfilePicker({ active, onSelect }) {
 
   return (
     <div className="profile-picker">
-      <label className="profile-label">Who's practicing?</label>
+      <span className="profile-label">Profile</span>
       <div className="profile-list">
         {profiles.map((p) => (
           <button
@@ -50,8 +50,8 @@ export default function ProfilePicker({ active, onSelect }) {
             className={`profile-chip ${active?.id === p.id ? "active" : ""}`}
             onClick={() => onSelect(p)}
           >
+            <span className="profile-avatar">{initials(p.name)}</span>
             {p.name}
-            <span className="profile-count">{p.session_count}</span>
           </button>
         ))}
         {profiles.length === 0 && (
@@ -64,14 +64,21 @@ export default function ProfilePicker({ active, onSelect }) {
           type="text"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder="New profile name"
+          placeholder="New profile…"
           maxLength={40}
         />
-        <button type="submit" disabled={busy || !newName.trim()}>
+        <button type="submit" className="btn-primary" disabled={busy || !newName.trim()}>
           Add
         </button>
       </form>
       {error && <p className="error">{error}</p>}
     </div>
   );
+}
+
+// First letters of the name (up to two) for the avatar bubble.
+function initials(name) {
+  const parts = name.trim().split(/\s+/);
+  const letters = parts.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "");
+  return letters.join("") || "?";
 }

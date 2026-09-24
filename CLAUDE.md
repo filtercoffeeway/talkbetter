@@ -40,6 +40,14 @@ docstring describing what to build. Implement in phase order.
   Frontend: `ProfilePicker.jsx` (name-only, no auth) + `Dashboard.jsx` (Chart.js trends + streak).
   `/api/analyze` takes an optional `profile_id` form field; when present the session is saved and the
   response includes `session_id`. Persistence works even before Phases 1–3 land (metrics nullable).
+- **Phase 4 (built): American-accent course.** Static curriculum (units → lessons; each lesson is a
+  reference sentence + coaching) in `backend/app/services/course.py`; per-profile progress in the
+  `lesson_progress` table keyed `(profile_id, lesson_id)` (storage fns `get_lesson_progress` /
+  `record_lesson_attempt`). Endpoint `GET /api/course[?profile_id=]` (`backend/app/routers/course.py`)
+  returns the curriculum with progress overlaid. Practicing a lesson = accent practice with that
+  sentence: `/api/analyze` takes an optional `lesson_id` form field and advances the lesson on each
+  attempt (completes when `pron_score` ≥ `TARGET_SCORE`, default 80). Frontend: `Course.jsx` ("📚 Course"
+  view in `App.jsx`); lesson ids are stable slugs (the progress key) — don't rename them.
 
 ## Conventions
 - Keep `schemas.py` and the API section of `docs/spec.html` in sync — the frontend trusts those field names.

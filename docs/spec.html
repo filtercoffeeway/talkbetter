@@ -188,6 +188,7 @@ docstring describing exactly what to build. Implement them in phase order.</p>
   <tr><td><code>audio</code></td><td>file</td><td>yes</td><td>webm/opus from MediaRecorder (or wav/mp3)</td></tr>
   <tr><td><code>reference_text</code></td><td>string</td><td>no</td><td>Present only in accent mode; triggers Phase 3 scoring</td></tr>
   <tr><td><code>profile_id</code></td><td>int</td><td>no</td><td>Phase 4. If given, the session is saved under that profile and the response includes <code>session_id</code>. Omit for a one-off, non-persisted analysis.</td></tr>
+  <tr><td><code>lesson_id</code></td><td>string</td><td>no</td><td>Phase 4 (course). When practicing an accent-course lesson, its slug. Requires <code>profile_id</code>; advances that lesson's progress (uses <code>accent.pron_score</code>, so it only "completes" when Phase 3 is configured). See the course section below.</td></tr>
 </table>
 <p><strong>Response</strong> — <code>application/json</code>, shape defined authoritatively in
 <code>backend/app/models/schemas.py</code>. Summary:</p>
@@ -223,6 +224,42 @@ stdlib <code>sqlite3</code>, gitignored). Names are unique case-insensitively.</
                   "filler_rate_per_min","clarity_score","pron_score" } ]   // newest first
 }</code></pre>
 <p class="muted">Keep <code>schemas.py</code> and this section in lockstep. The frontend trusts these field names.</p>
+
+<h3>Phase 4 — American-accent course <span class="pill local">No API key</span></h3>
+<p>A guided <strong>course</strong> for the American accent: a static, ordered curriculum of
+<strong>units → lessons</strong> (each lesson is a reference sentence plus coaching), with
+<strong>per-profile progress</strong> saved in SQLite. The curriculum is content, not a DB table —
+it lives in <code>services/course.py</code>; progress lives in the <code>lesson_progress</code>
+table keyed by <code>(profile_id, lesson_id)</code>. Practicing a lesson is just accent practice
+with the lesson's sentence: <code>POST /api/analyze</code> with <code>reference_text</code> +
+<code>lesson_id</code> records an attempt. A lesson is <strong>completed</strong> the first time an
+attempt's <code>pron_score</code> reaches <code>target_score</code> (default 80); once completed it
+stays completed. Attempts without a score (Phase 3 not configured) still count and leave the lesson
+<code>attempted</code>.</p>
+<table>
+  <tr><th>Endpoint</th><th>Purpose</th></tr>
+  <tr><td><code>GET /api/course</code></td><td>The static curriculum (every lesson's <code>progress</code> is null, no <code>summary</code>).</td></tr>
+  <tr><td><code>GET /api/course?profile_id=&lt;id&gt;</code></td><td>Same curriculum with that profile's per-lesson <code>progress</code> overlaid + a completion <code>summary</code>.</td></tr>
+</table>
+<pre><code>// GET /api/course?profile_id=&lt;id&gt; response (shape = CourseResponse)
+{
+  "title": str, "description": str, "target_score": float,
+  "units": [ { "id": str, "title": str, "description": str,
+               "lessons": [ { "id": str, "title": str, "focus": str, "tip": str,
+                              "reference_text": str, "example_words": [str],
+                              "progress": null | {            // null until attempted
+                                "status": "not_started"|"attempted"|"completed",
+                                "attempts": int, "best_score": float|null,
+                                "last_score": float|null,
+                                "last_practiced_at": str|null, "completed_at": str|null
+                              } } ] } ],
+  "summary": null | {                                          // present only with profile_id
+    "total_lessons": int, "completed_lessons": int, "attempted_lessons": int,
+    "percent_complete": float, "target_score": float
+  }
+}</code></pre>
+<p class="muted">Lesson <code>id</code>s are stable slugs (the progress key) — add lessons freely;
+renaming an id resets that lesson's history. Keep <code>schemas.py</code> and this section in lockstep.</p>
 
 <!-- ============================================================= -->
 <h2 id="env">6. Environment & configuration</h2>

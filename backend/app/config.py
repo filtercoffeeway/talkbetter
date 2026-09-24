@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # LLM (Phase 2)
     llm_provider: str = "anthropic"          # "anthropic" | "openai"
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-6"
+    anthropic_model: str = "claude-haiku-4-5-20251001"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
 

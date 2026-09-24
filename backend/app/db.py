@@ -4,11 +4,14 @@ Uses Python's stdlib ``sqlite3`` only — no new dependencies (see spec.html
 Phase 4). The DB file lives at ``<repo>/data/talkbetter.db`` by default and is
 gitignored. Schema is created on first use via :func:`init_db`.
 
-Two tables:
-  profiles  — one row per person sharing this local machine.
-  sessions  — one row per analyzed recording, linked to a profile. We store the
-              headline metrics as columns (so history/charts are cheap to query)
-              plus the full AnalysisResponse JSON for replay/export.
+Three tables:
+  profiles         — one row per person sharing this local machine.
+  sessions         — one row per analyzed recording, linked to a profile. We store
+                     the headline metrics as columns (so history/charts are cheap to
+                     query) plus the full AnalysisResponse JSON for replay/export.
+  lesson_progress  — one row per (profile, accent-course lesson): a profile's standing
+                     on a lesson (attempts, best score, completion). Lessons themselves
+                     are static content in services/course.py, not a DB table.
 """
 from __future__ import annotations
 
@@ -47,6 +50,18 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_profile_created
     ON sessions(profile_id, created_at);
+
+CREATE TABLE IF NOT EXISTS lesson_progress (
+    profile_id        INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    lesson_id         TEXT NOT NULL,                 -- slug from services/course.py
+    status            TEXT NOT NULL DEFAULT 'attempted',  -- 'attempted' | 'completed'
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    best_score        REAL,                          -- best pron_score reached (nullable)
+    last_score        REAL,                          -- most recent attempt's pron_score
+    last_practiced_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at      TEXT,                          -- first time it crossed target score
+    PRIMARY KEY (profile_id, lesson_id)
+);
 """
 
 

@@ -14,7 +14,14 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.config import settings
 from app.models.schemas import AnalysisResponse
-from app.services import filler_pace, llm_feedback, pronunciation, storage, transcription
+from app.services import (
+    course,
+    filler_pace,
+    llm_feedback,
+    pronunciation,
+    storage,
+    transcription,
+)
 
 router = APIRouter()
 
@@ -24,6 +31,7 @@ async def analyze(
     audio: UploadFile = File(...),
     reference_text: str | None = Form(None),   # used by Phase 3 accent scoring
     profile_id: int | None = Form(None),       # Phase 4: persist under this profile
+    lesson_id: str | None = Form(None),        # Phase 4: practicing a course lesson
 ) -> AnalysisResponse:
     audio_bytes = await audio.read()
 
@@ -54,5 +62,16 @@ async def analyze(
             raise HTTPException(status_code=404, detail="Profile not found.")
         mode = "accent" if reference_text else "free"
         response.session_id = storage.save_session(profile_id, mode, response)
+
+        # If this was an accent-course lesson, advance that lesson's progress.
+        # We key off the lesson's pronunciation score (None when Phase 3 isn't
+        # configured — the attempt still counts, it just can't "complete").
+        if lesson_id is not None:
+            if course.get_lesson(lesson_id) is None:
+                raise HTTPException(status_code=404, detail="Lesson not found.")
+            score = response.accent.pron_score if response.accent else None
+            storage.record_lesson_attempt(
+                profile_id, lesson_id, score, course.TARGET_SCORE
+            )
 
     return response

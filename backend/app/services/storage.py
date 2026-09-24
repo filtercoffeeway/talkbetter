@@ -15,6 +15,7 @@ from app import db
 from app.models.schemas import (
     AnalysisResponse,
     HistoryResponse,
+    LessonProgress,
     Profile,
     SessionSummary,
 )
@@ -133,6 +134,105 @@ def list_history(profile_id: int, limit: int = 100) -> HistoryResponse:
     streak = _current_streak(s.created_at for s in sessions)
     return HistoryResponse(
         profile_id=profile_id, current_streak=streak, sessions=sessions
+    )
+
+
+# ---------- course / lesson progress (Phase 4 — accent course) ----------
+def get_lesson_progress(profile_id: int) -> dict[str, LessonProgress]:
+    """Return ``{lesson_id: LessonProgress}`` for one profile.
+
+    Lessons the profile has never attempted are simply absent from the map;
+    callers (services/course.py) treat a missing entry as "not_started".
+    """
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT lesson_id, status, attempts, best_score, last_score,
+                   last_practiced_at, completed_at
+            FROM lesson_progress
+            WHERE profile_id = ?
+            """,
+            (profile_id,),
+        ).fetchall()
+    return {
+        r["lesson_id"]: LessonProgress(
+            status=r["status"],
+            attempts=r["attempts"],
+            best_score=r["best_score"],
+            last_score=r["last_score"],
+            last_practiced_at=r["last_practiced_at"],
+            completed_at=r["completed_at"],
+        )
+        for r in rows
+    }
+
+
+def record_lesson_attempt(
+    profile_id: int, lesson_id: str, score: float | None, target_score: float
+) -> LessonProgress:
+    """Record one practice attempt at a lesson and return the updated standing.
+
+    Read-modify-write so we can keep the *best* score and a stable
+    ``completed_at`` across attempts. A lesson becomes ``completed`` the first
+    time an attempt's ``score`` reaches ``target_score``; once completed it stays
+    completed even if a later attempt scores lower. Attempts without a score
+    (e.g. Phase 3 not configured) still count toward ``attempts`` and leave the
+    lesson ``attempted``.
+    """
+    with db.get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT attempts, best_score, status, completed_at
+            FROM lesson_progress
+            WHERE profile_id = ? AND lesson_id = ?
+            """,
+            (profile_id, lesson_id),
+        ).fetchone()
+
+        attempts = (row["attempts"] if row else 0) + 1
+        prev_best = row["best_score"] if row else None
+        best_score = max([s for s in (prev_best, score) if s is not None], default=None)
+        completed_at = row["completed_at"] if row else None
+        status = row["status"] if row else "attempted"
+
+        if score is not None and score >= target_score:
+            status = "completed"
+            if completed_at is None:
+                completed_at = datetime.now().isoformat(" ", "seconds")
+
+        conn.execute(
+            """
+            INSERT INTO lesson_progress (
+                profile_id, lesson_id, status, attempts,
+                best_score, last_score, last_practiced_at, completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
+            ON CONFLICT(profile_id, lesson_id) DO UPDATE SET
+                status            = excluded.status,
+                attempts          = excluded.attempts,
+                best_score        = excluded.best_score,
+                last_score        = excluded.last_score,
+                last_practiced_at = excluded.last_practiced_at,
+                completed_at      = excluded.completed_at
+            """,
+            (profile_id, lesson_id, status, attempts, best_score, score, completed_at),
+        )
+        updated = conn.execute(
+            """
+            SELECT status, attempts, best_score, last_score,
+                   last_practiced_at, completed_at
+            FROM lesson_progress
+            WHERE profile_id = ? AND lesson_id = ?
+            """,
+            (profile_id, lesson_id),
+        ).fetchone()
+
+    return LessonProgress(
+        status=updated["status"],
+        attempts=updated["attempts"],
+        best_score=updated["best_score"],
+        last_score=updated["last_score"],
+        last_practiced_at=updated["last_practiced_at"],
+        completed_at=updated["completed_at"],
     )
 
 

@@ -22,15 +22,24 @@ export default function Dashboard({ profile, refreshKey }) {
 
   if (!profile) return null;
   if (error) return <p className="error">{error}</p>;
-  if (!history) return <p className="status">Loading progress…</p>;
+  if (!history)
+    return (
+      <div className="analyzing">
+        <span className="spinner" /> Loading progress…
+      </div>
+    );
 
   const { sessions, current_streak } = history;
   if (sessions.length === 0) {
     return (
       <section className="dashboard">
-        <p className="muted">
-          No sessions yet for {profile.name}. Record one to start tracking progress.
-        </p>
+        <div className="card empty">
+          <span className="empty-emoji">🌱</span>
+          <p className="muted">
+            No sessions yet for {profile.name}. Record one to start tracking
+            progress.
+          </p>
+        </div>
       </section>
     );
   }
@@ -53,7 +62,7 @@ export default function Dashboard({ profile, refreshKey }) {
   return (
     <section className="dashboard">
       <div className="stat-grid">
-        <Stat label="Streak" value={`${current_streak}🔥`} />
+        <Stat label="Day streak" value={`${current_streak} 🔥`} />
         <Stat label="Sessions" value={sessions.length} />
         <Stat
           label="Latest WPM"
@@ -69,13 +78,13 @@ export default function Dashboard({ profile, refreshKey }) {
         title="Speaking pace (words/min)"
         labels={labels}
         data={ordered.map((s) => s.words_per_minute)}
-        color="#6c8cff"
+        color="#7c8cff"
       />
       <TrendChart
         title="Filler words (per min)"
         labels={labels}
         data={ordered.map((s) => s.filler_rate_per_min)}
-        color="#ff9f43"
+        color="#fbbf24"
       />
       {/* Phase 2/3 metrics: only chart them once any session has the data. */}
       {ordered.some((s) => s.clarity_score != null) && (
@@ -83,7 +92,7 @@ export default function Dashboard({ profile, refreshKey }) {
           title="Clarity score"
           labels={labels}
           data={ordered.map((s) => s.clarity_score)}
-          color="#26de81"
+          color="#34d399"
         />
       )}
       {ordered.some((s) => s.pron_score != null) && (
@@ -91,7 +100,7 @@ export default function Dashboard({ profile, refreshKey }) {
           title="Pronunciation score"
           labels={labels}
           data={ordered.map((s) => s.pron_score)}
-          color="#a55eea"
+          color="#a87bff"
         />
       )}
 
@@ -135,10 +144,29 @@ function TrendChart({ title, labels, data, color }) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#141826",
+            borderColor: "rgba(255,255,255,0.12)",
+            borderWidth: 1,
+            padding: 10,
+            titleColor: "#eef1f9",
+            bodyColor: "#97a0b5",
+            displayColors: false,
+          },
+        },
         scales: {
-          x: { ticks: { color: "#9aa0b0" }, grid: { color: "#2a2e3a" } },
-          y: { ticks: { color: "#9aa0b0" }, grid: { color: "#2a2e3a" } },
+          x: {
+            ticks: { color: "#6b7488" },
+            grid: { color: "rgba(255,255,255,0.05)" },
+            border: { display: false },
+          },
+          y: {
+            ticks: { color: "#6b7488" },
+            grid: { color: "rgba(255,255,255,0.05)" },
+            border: { display: false },
+          },
         },
       },
     });
@@ -158,11 +186,13 @@ function TrendChart({ title, labels, data, color }) {
 function RecentList({ sessions }) {
   return (
     <div className="card">
-      <h3>Recent sessions</h3>
+      <h3>
+        <span className="card-icon">🕑</span> Recent sessions
+      </h3>
       <ul className="recent">
         {sessions.map((s) => (
           <li key={s.id}>
-            <span className="muted">
+            <span className="recent-date">
               {new Date(s.created_at + "Z").toLocaleString(undefined, {
                 month: "short",
                 day: "numeric",
@@ -171,7 +201,7 @@ function RecentList({ sessions }) {
               })}
             </span>
             <span className="recent-tag">{s.mode}</span>
-            <span>
+            <span className="recent-metrics">
               {s.words_per_minute != null ? `${Math.round(s.words_per_minute)} wpm` : ""}
               {s.filler_rate_per_min != null ? ` · ${s.filler_rate_per_min.toFixed(1)} filler/min` : ""}
             </span>
