@@ -1,102 +1,43 @@
-"""Phase 3 — American-accent scoring via Azure Pronunciation Assessment."""
+"""Phase 3 — American-accent scoring, dispatched by PRONUNCIATION_PROVIDER.
+
+  local -> pronunciation_local  (wav2vec2 phoneme model + espeak-ng; no key)
+  azure -> pronunciation_azure  (Azure Pronunciation Assessment; needs a key)
+
+Both return the same AccentReport, so switching is a config change only.
+"""
 from __future__ import annotations
 
-import subprocess
-import tempfile
-from pathlib import Path
+import importlib.util
+import shutil
 
 from app.config import settings
-from app.models.schemas import AccentReport, PhonemeScore, WordPronunciation
-
-_ACCURACY_THRESHOLD = 60.0
+from app.models.schemas import AccentReport
 
 
-def _to_wav_16k(audio_bytes: bytes, src_suffix: str) -> bytes:
-    """Transcode arbitrary audio to 16kHz mono PCM WAV using ffmpeg."""
-    with (
-        tempfile.NamedTemporaryFile(suffix=src_suffix, delete=False) as src,
-        tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as dst,
-    ):
-        src.write(audio_bytes)
-        src_path, dst_path = src.name, dst.name
+def is_available() -> bool:
+    """True when the configured provider has what it needs to run.
 
-    try:
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-i", src_path,
-                "-ar", "16000", "-ac", "1",
-                "-f", "wav", dst_path,
-            ],
-            check=True,
-            capture_output=True,
+    Used by the router to skip Phase 3 gracefully instead of erroring.
+    """
+    provider = settings.pronunciation_provider
+    if provider == "azure":
+        return bool(settings.azure_speech_key and settings.azure_speech_region)
+    if provider == "local":
+        return (
+            importlib.util.find_spec("torch") is not None
+            and importlib.util.find_spec("transformers") is not None
+            and shutil.which("espeak-ng") is not None
         )
-        return Path(dst_path).read_bytes()
-    finally:
-        Path(src_path).unlink(missing_ok=True)
-        Path(dst_path).unlink(missing_ok=True)
+    return False
 
 
 def assess(audio_bytes: bytes, reference_text: str, src_suffix: str = ".webm") -> AccentReport:
-    """Score pronunciation of audio against the reference sentence via Azure."""
-    import azure.cognitiveservices.speech as speechsdk
-
-    wav_bytes = _to_wav_16k(audio_bytes, src_suffix)
-
-    speech_config = speechsdk.SpeechConfig(
-        subscription=settings.azure_speech_key,
-        region=settings.azure_speech_region,
-    )
-
-    pron_config = speechsdk.PronunciationAssessmentConfig(
-        reference_text=reference_text,
-        grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
-        granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
-        enable_miscue=True,
-    )
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp.write(wav_bytes)
-        wav_path = tmp.name
-
-    try:
-        audio_cfg = speechsdk.audio.AudioConfig(filename=wav_path)
-        recognizer = speechsdk.SpeechRecognizer(
-            speech_config=speech_config,
-            audio_config=audio_cfg,
-        )
-        pron_config.apply_to(recognizer)
-
-        result = recognizer.recognize_once_async().get()
-
-        if result.reason != speechsdk.ResultReason.RecognizedSpeech:
-            raise RuntimeError(f"Azure recognition failed: {result.reason}")
-
-        pron_result = speechsdk.PronunciationAssessmentResult(result)
-        pa = pron_result.pronunciation_assessment
-
-        problem_words: list[WordPronunciation] = []
-        for word in pron_result.words:
-            wa = word.pronunciation_assessment
-            phonemes = [
-                PhonemeScore(phoneme=p.phoneme, accuracy=p.pronunciation_assessment.accuracy_score)
-                for p in (word.phonemes or [])
-            ]
-            if wa.accuracy_score < _ACCURACY_THRESHOLD or wa.error_type not in (None, "None", ""):
-                problem_words.append(
-                    WordPronunciation(
-                        word=word.word,
-                        accuracy=wa.accuracy_score,
-                        error_type=wa.error_type if wa.error_type not in (None, "None", "") else None,
-                        phonemes=phonemes,
-                    )
-                )
-
-        return AccentReport(
-            accuracy_score=pa["AccuracyScore"],
-            fluency_score=pa["FluencyScore"],
-            completeness_score=pa["CompletenessScore"],
-            pron_score=pa["PronScore"],
-            problem_words=problem_words,
-        )
-    finally:
-        Path(wav_path).unlink(missing_ok=True)
+    """Score pronunciation of `audio_bytes` against `reference_text`."""
+    provider = settings.pronunciation_provider
+    if provider == "azure":
+        from app.services import pronunciation_azure as impl
+    elif provider == "local":
+        from app.services import pronunciation_local as impl
+    else:
+        raise ValueError(f"Unknown PRONUNCIATION_PROVIDER: {provider!r}")
+    return impl.assess(audio_bytes, reference_text, src_suffix)

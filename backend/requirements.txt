@@ -12,8 +12,12 @@ faster-whisper>=1.1.0          # local Whisper, word-level timestamps
 anthropic>=0.39.0              # default LLM provider (Claude); swappable
 # openai>=1.51.0               # uncomment if switching LLM_PROVIDER=openai
 
-# --- Phase 3: American-accent scoring ---
-azure-cognitiveservices-speech>=1.40.0   # Azure Pronunciation Assessment
+# --- Phase 3: American-accent scoring (PRONUNCIATION_PROVIDER) ---
+# local (default): wav2vec2 phoneme model; also needs `espeak-ng` on the host
+torch>=2.6
+transformers>=4.45
+# azure: Azure Pronunciation Assessment (needs AZURE_SPEECH_KEY/REGION)
+azure-cognitiveservices-speech>=1.40.0
 
 # --- Utilities ---
 python-dotenv>=1.0.1

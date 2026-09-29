@@ -9,15 +9,19 @@ async function asJson(res, label) {
   return res.json();
 }
 
-export async function analyzeAudio(audioBlob, referenceText, profileId, lessonId) {
+// `programActivity` = { day, activityId } scores the recording against a 30-day
+// program activity (the backend then uses that activity's own sentence/prompt).
+export async function analyzeAudio(audioBlob, referenceText, profileId, programActivity) {
   const form = new FormData();
   // Filename extension hints the backend at the container; webm is what
   // MediaRecorder produces by default in Chrome/Edge.
   form.append("audio", audioBlob, "recording.webm");
   if (referenceText) form.append("reference_text", referenceText);
   if (profileId != null) form.append("profile_id", String(profileId));
-  // When set, the backend advances this accent-course lesson's progress.
-  if (lessonId) form.append("lesson_id", lessonId);
+  if (programActivity) {
+    form.append("program_day", String(programActivity.day));
+    form.append("activity_id", programActivity.activityId);
+  }
 
   const res = await fetch("/api/analyze", { method: "POST", body: form });
   return asJson(res, "Analyze"); // shape = AnalysisResponse (see backend schemas.py)
@@ -42,9 +46,13 @@ export async function getHistory(profileId) {
   return asJson(res, "Load history"); // shape = HistoryResponse
 }
 
-// American-accent course. Pass a profileId to overlay that person's progress
-// (per-lesson status + a completion summary); omit it for the bare curriculum.
-export async function getCourse(profileId) {
-  const qs = profileId != null ? `?profile_id=${encodeURIComponent(profileId)}` : "";
-  return asJson(await fetch(`/api/course${qs}`), "Load course"); // shape = CourseResponse
+// ---------- 30-day program ----------
+export async function getProgram(profileId) {
+  const res = await fetch(`/api/program?profile_id=${encodeURIComponent(profileId)}`);
+  return asJson(res, "Load program"); // shape = ProgramResponse
+}
+
+export async function getBenchmarks(profileId) {
+  const res = await fetch(`/api/program/benchmarks?profile_id=${encodeURIComponent(profileId)}`);
+  return asJson(res, "Load benchmarks"); // shape = BenchmarkHistory
 }

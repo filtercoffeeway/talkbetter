@@ -7,6 +7,8 @@ Build order (see docs/spec.html):
   Phase 1 -> transcription + pace_fillers
   Phase 2 -> language (grammar + clarity)
   Phase 3 -> accent (requires `reference_text`)
+  30-day program -> `program_day` + `activity_id` score the recording against
+                    that day's activity (and the daily benchmark)
 """
 from pathlib import Path
 
@@ -15,10 +17,11 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.config import settings
 from app.models.schemas import AnalysisResponse
 from app.services import (
-    course,
     filler_pace,
     llm_feedback,
+    program,
     pronunciation,
+    recordings,
     storage,
     transcription,
 )
@@ -31,8 +34,20 @@ async def analyze(
     audio: UploadFile = File(...),
     reference_text: str | None = Form(None),   # used by Phase 3 accent scoring
     profile_id: int | None = Form(None),       # Phase 4: persist under this profile
-    lesson_id: str | None = Form(None),        # Phase 4: practicing a course lesson
+    program_day: int | None = Form(None),      # 30-day program: which day (1-30) …
+    activity_id: str | None = Form(None),      # … and which of its activities
 ) -> AnalysisResponse:
+    # The program's content is authoritative: a read activity always scores its
+    # own sentence, so the benchmark passage can't drift.
+    activity = None
+    if program_day is not None or activity_id is not None:
+        if profile_id is None:
+            raise HTTPException(status_code=400, detail="Program activities need a profile_id.")
+        activity = program.get_activity(program_day or 0, activity_id or "")
+        if activity is None:
+            raise HTTPException(status_code=404, detail="Program activity not found.")
+        reference_text = activity.reference_text
+
     audio_bytes = await audio.read()
 
     # --- Phase 1 ---
@@ -42,17 +57,22 @@ async def analyze(
     response = AnalysisResponse(transcript=transcript, pace_fillers=pace)
 
     # --- Phase 2 (skipped if no LLM key is configured) ---
-    llm_key = (
-        settings.anthropic_api_key
-        if settings.llm_provider == "anthropic"
-        else settings.openai_api_key
-    )
-    if transcript.text.strip() and llm_key:
+    # Not for read-aloud: the words come from a script, so grammar says nothing
+    # about the speaker — accent scoring (Phase 3) judges whether they were said right.
+    if transcript.text.strip() and not reference_text and llm_feedback.is_available():
         response.language = llm_feedback.analyze(transcript.text)
+        # Open-ended program answers also get the confidence/structure rubric.
+        if activity is not None and activity.kind == "speak":
+            response.speaking = llm_feedback.assess_speaking(
+                transcript.text, activity.prompt, pace
+            )
 
-    # --- Phase 3 (skipped if no Azure key or no reference text) ---
-    if reference_text and settings.azure_speech_key:
-        src_suffix = Path(audio.filename).suffix if audio.filename else ".webm"
+    # --- Phase 3 (skipped if no reference text or the provider isn't set up) ---
+    src_suffix = Path(audio.filename).suffix if audio.filename else ".webm"
+    if reference_text and settings.save_recordings:
+        label = f"day{program_day:02d}-{activity_id}" if activity else None
+        recordings.save(audio_bytes, src_suffix, reference_text, label)
+    if reference_text and pronunciation.is_available():
         response.accent = pronunciation.assess(audio_bytes, reference_text, src_suffix)
 
     # --- Phase 4: persist the session for progress tracking ---
@@ -63,15 +83,9 @@ async def analyze(
         mode = "accent" if reference_text else "free"
         response.session_id = storage.save_session(profile_id, mode, response)
 
-        # If this was an accent-course lesson, advance that lesson's progress.
-        # We key off the lesson's pronunciation score (None when Phase 3 isn't
-        # configured — the attempt still counts, it just can't "complete").
-        if lesson_id is not None:
-            if course.get_lesson(lesson_id) is None:
-                raise HTTPException(status_code=404, detail="Lesson not found.")
-            score = response.accent.pron_score if response.accent else None
-            storage.record_lesson_attempt(
-                profile_id, lesson_id, score, course.TARGET_SCORE
+        if activity is not None:
+            response.program = program.record_attempt(
+                profile_id, program_day, activity, response, response.session_id
             )
 
     return response

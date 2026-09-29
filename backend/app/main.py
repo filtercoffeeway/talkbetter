@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_db
-from app.routers import analysis, course, history, profiles
+from app.routers import analysis, history, profiles, program
+from app.services import pronunciation
 
 
 @asynccontextmanager
@@ -19,7 +20,13 @@ async def lifespan(_app: FastAPI):
     llm_key = settings.anthropic_api_key if settings.llm_provider == "anthropic" else settings.openai_api_key
     print(f"  Phase 1 (transcription/pace):  ON  [whisper={settings.whisper_model}]")
     print(f"  Phase 2 (grammar/clarity LLM): {'ON ' if llm_key else 'OFF — set ANTHROPIC_API_KEY in backend/.env'}")
-    print(f"  Phase 3 (accent/Azure):        {'ON ' if settings.azure_speech_key else 'OFF — set AZURE_SPEECH_KEY in backend/.env'}")
+    accent_off_hint = (
+        "set AZURE_SPEECH_KEY/REGION in backend/.env"
+        if settings.pronunciation_provider == "azure"
+        else "install espeak-ng (and ffmpeg)"
+    )
+    label = f"Phase 3 (accent/{settings.pronunciation_provider}):".ljust(31)
+    print(f"  {label}{'ON ' if pronunciation.is_available() else 'OFF — ' + accent_off_hint}")
     yield
 
 
@@ -35,7 +42,7 @@ app.add_middleware(
 app.include_router(analysis.router, prefix="/api")
 app.include_router(profiles.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
-app.include_router(course.router, prefix="/api")
+app.include_router(program.router, prefix="/api")
 
 
 @app.get("/api/health")

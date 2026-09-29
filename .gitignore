@@ -14,8 +14,9 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Whisper model cache (downloaded at runtime)
-models/
+# Model caches (downloaded at runtime). Anchored to the repo root so it doesn't
+# also hide backend/app/models/ (the API schemas).
+/models/
 *.bin
 
 # User audio data (do not commit recordings)
@@ -23,8 +24,9 @@ data/recordings/*
 !data/recordings/.gitkeep
 
 # Local progress DB (per-machine, contains personal practice history)
-data/talkbetter.db
 data/*.db
+data/*.db.*
+data/*.db-*
 
 # OS / editor
 .DS_Store
@@ -34,3 +36,6 @@ data/*.db
 
 # Runtime PIDs from start.sh
 .pids
+
+# Local credentials scratch file
+secrets.txt

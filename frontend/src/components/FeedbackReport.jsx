@@ -2,7 +2,7 @@
 // online: pace_fillers (Phase 1) always; language (Phase 2) and accent
 // (Phase 3) only when present.
 export default function FeedbackReport({ report }) {
-  const { transcript, pace_fillers, language, accent } = report;
+  const { transcript, pace_fillers, language, accent, speaking } = report;
 
   return (
     <section className="report">
@@ -55,6 +55,41 @@ export default function FeedbackReport({ report }) {
           </div>
         )}
       </div>
+
+      {/* 30-day program: confidence + thought-process rubric (open answers only) */}
+      {speaking && (
+        <div className="card">
+          <h3>
+            <span className="card-icon">💬</span> Confidence &amp; thinking
+          </h3>
+          <div className="subscores speaking-scores">
+            <SubScore label="Confidence" value={speaking.confidence} />
+            <SubScore label="Structure" value={speaking.structure} />
+            <SubScore label="Vocabulary" value={speaking.vocabulary} />
+          </div>
+          <p>{speaking.summary}</p>
+          {speaking.strengths?.length > 0 && (
+            <ul className="speaking-list good">
+              {speaking.strengths.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          )}
+          {speaking.improvements?.length > 0 && (
+            <ul className="speaking-list fix">
+              {speaking.improvements.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          )}
+          {speaking.stronger_version && (
+            <div className="corrected">
+              <span className="lbl">Say it like this</span>
+              {speaking.stronger_version}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Phase 2 */}
       {language && (

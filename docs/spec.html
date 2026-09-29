@@ -98,7 +98,7 @@ except for the optional cloud calls in Phases 2–3.</p>
 <ul>
   <li><strong>Free speaking</strong> — user talks about anything. Drives Phases 1 & 2.</li>
   <li><strong>Accent practice</strong> — user reads a known reference sentence aloud. Required for
-  Phase 3, because Azure pronunciation scoring is reference-based (it compares what was said
+  Phase 3, because pronunciation scoring (local or Azure) is reference-based (it compares what was said
   to expected text).</li>
 </ul>
 
@@ -111,11 +111,12 @@ except for the optional cloud calls in Phases 2–3.</p>
   <tr><td>Backend</td><td>FastAPI (Python) + Uvicorn</td><td>Async, typed, trivial file uploads, auto OpenAPI docs at <code>/docs</code>.</td></tr>
   <tr><td>Transcription</td><td>faster-whisper</td><td>Local, free, word-level timestamps; no API key.</td></tr>
   <tr><td>Grammar/clarity</td><td>LLM (Claude default, OpenAI swappable)</td><td>Strong at ESL correction + structured JSON output.</td></tr>
-  <tr><td>Accent</td><td>Azure Pronunciation Assessment</td><td>Phoneme-level scores out of the box; free tier exists.</td></tr>
+  <tr><td>Accent</td><td>Local wav2vec2 phoneme model + espeak-ng (default); Azure Pronunciation Assessment swappable</td><td>Local needs no account or key; Azure gives more polished scores. Selected by <code>PRONUNCIATION_PROVIDER</code>.</td></tr>
   <tr><td>Audio transcode</td><td>ffmpeg</td><td>Convert webm/opus → 16kHz mono WAV for Whisper/Azure.</td></tr>
 </table>
 <p class="muted">Pinned versions live in <code>backend/requirements.txt</code> and
-<code>frontend/package.json</code>. ffmpeg must be installed on the host (<code>brew install ffmpeg</code>).</p>
+<code>frontend/package.json</code>. ffmpeg must be installed on the host (<code>brew install ffmpeg</code>), and
+<code>espeak-ng</code> for local accent scoring (<code>brew install espeak-ng</code>).</p>
 
 <!-- ============================================================= -->
 <h2 id="architecture">3. Architecture & data flow</h2>
@@ -132,7 +133,7 @@ Browser (React)                         FastAPI backend
                                    ┌────────┼─────────────────────────────┐
                                    ▼        ▼                ▼             ▼
                           transcription  filler_pace   llm_feedback   pronunciation
-                          (Whisper)      (pure py)     (Phase 2)      (Phase 3, Azure)
+                          (Whisper)      (pure py)     (Phase 2)      (Phase 3)      
                                    │        │                │             │
                                    └────────┴───────┬────────┴─────────────┘
                                                     ▼
@@ -164,7 +165,9 @@ sections are non-null, so partially-built backends still work.</p>
 │       │   ├── transcription.py       # Phase 1  (Whisper)        [stub]
 │       │   ├── filler_pace.py         # Phase 1  (pure python)    [stub]
 │       │   ├── llm_feedback.py        # Phase 2  (LLM)            [stub]
-│       │   └── pronunciation.py       # Phase 3  (Azure)          [stub]
+│       │   ├── pronunciation.py       # Phase 3  provider dispatch
+│       │   ├── pronunciation_local.py # Phase 3  (wav2vec2 + espeak-ng, no key)
+│       │   └── pronunciation_azure.py # Phase 3  (Azure)
 │       └── models/schemas.py          # Pydantic response models (API contract)
 │   └── tests/test_filler_pace.py      # Phase 1 unit tests (skipped until impl)
 ├── frontend/
@@ -186,9 +189,9 @@ docstring describing exactly what to build. Implement them in phase order.</p>
 <table>
   <tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr>
   <tr><td><code>audio</code></td><td>file</td><td>yes</td><td>webm/opus from MediaRecorder (or wav/mp3)</td></tr>
-  <tr><td><code>reference_text</code></td><td>string</td><td>no</td><td>Present only in accent mode; triggers Phase 3 scoring</td></tr>
+  <tr><td><code>reference_text</code></td><td>string</td><td>no</td><td>Present only in accent mode; triggers Phase 3 scoring and skips Phase 2 (read-aloud words come from the script, so grammar isn't judged)</td></tr>
   <tr><td><code>profile_id</code></td><td>int</td><td>no</td><td>Phase 4. If given, the session is saved under that profile and the response includes <code>session_id</code>. Omit for a one-off, non-persisted analysis.</td></tr>
-  <tr><td><code>lesson_id</code></td><td>string</td><td>no</td><td>Phase 4 (course). When practicing an accent-course lesson, its slug. Requires <code>profile_id</code>; advances that lesson's progress (uses <code>accent.pron_score</code>, so it only "completes" when Phase 3 is configured). See the course section below.</td></tr>
+  <tr><td><code>program_day</code> + <code>activity_id</code></td><td>int + string</td><td>no</td><td>30-day program: score this recording against that day's activity (see the program section below). Requires <code>profile_id</code>.</td></tr>
 </table>
 <p><strong>Response</strong> — <code>application/json</code>, shape defined authoritatively in
 <code>backend/app/models/schemas.py</code>. Summary:</p>
@@ -225,43 +228,34 @@ stdlib <code>sqlite3</code>, gitignored). Names are unique case-insensitively.</
 }</code></pre>
 <p class="muted">Keep <code>schemas.py</code> and this section in lockstep. The frontend trusts these field names.</p>
 
-<h3>Phase 4 — American-accent course <span class="pill local">No API key</span></h3>
-<p>A guided <strong>course</strong> for the American accent: a static, ordered curriculum of
-<strong>units → lessons</strong> (each lesson is a reference sentence plus coaching), with
-<strong>per-profile progress</strong> saved in SQLite. The curriculum is content, not a DB table —
-it lives in <code>services/course.py</code>; progress lives in the <code>lesson_progress</code>
-table keyed by <code>(profile_id, lesson_id)</code>. Practicing a lesson is just accent practice
-with the lesson's sentence: <code>POST /api/analyze</code> with <code>reference_text</code> +
-<code>lesson_id</code> records an attempt. A lesson is <strong>completed</strong> the first time an
-attempt's <code>pron_score</code> reaches <code>target_score</code> (default 80); once completed it
-stays completed. Attempts without a score (Phase 3 not configured) still count and leave the lesson
-<code>attempted</code>.</p>
+<h3>30-day program <span class="pill local">LLM optional</span></h3>
+<p>A 30-day, 30-minute-a-day program (the default view). Content: <code>services/program_content.py</code>;
+logic + scoring: <code>services/program.py</code>. Each day = a <strong>daily benchmark</strong> (5 min) +
+two pronunciation drills + two speaking tasks (25 min). Weeks: foundations → rhythm &amp; structured thinking →
+real conversations → confidence under pressure; days 7/14/21/28 repeat earlier prompts.</p>
+<p>The benchmark is the ground truth: the <em>same</em> read-aloud passage every day (→ <code>pron_score</code>)
+and a 90-second opinion answer whose topic rotates but whose format and difficulty never change
+(→ speaking composite). Only the <strong>first take</strong> of each part per day is stored.
+Daily score = 0.4 × read + 0.6 × speak. Speaking composite = fluency 30% (fillers/min, long pauses/min),
+pace 10% (100 in 120–160 wpm), confidence 20%, structure 20% (LLM rubric), clarity 20% (Phase 2);
+missing components renormalize. Recordings under 3 words (read) / 10 words (speak) don't count.</p>
+<p><code>POST /api/analyze</code> takes <code>program_day</code> + <code>activity_id</code> (needs
+<code>profile_id</code>; the activity's own sentence overrides <code>reference_text</code>). The response then
+adds <code>speaking</code> (speak activities, LLM configured) and <code>program</code>:</p>
+<pre><code>"speaking": null | { "confidence","structure","vocabulary": 0-100, "summary": str,
+                     "strengths": [str], "improvements": [str], "stronger_version": str },
+"program":  null | { "day": int, "activity_id": str, "counted": bool, "score": float|null,
+                     "benchmark_recorded": bool, "message": str }</code></pre>
 <table>
   <tr><th>Endpoint</th><th>Purpose</th></tr>
-  <tr><td><code>GET /api/course</code></td><td>The static curriculum (every lesson's <code>progress</code> is null, no <code>summary</code>).</td></tr>
-  <tr><td><code>GET /api/course?profile_id=&lt;id&gt;</code></td><td>Same curriculum with that profile's per-lesson <code>progress</code> overlaid + a completion <code>summary</code>.</td></tr>
+  <tr><td><code>GET /api/program[?profile_id=]</code></td><td><code>ProgramResponse</code>: weeks, 30 days × activities
+  (benchmark first), per-activity <code>result</code>, day <code>status</code> (locked/available/completed), <code>summary</code>.</td></tr>
+  <tr><td><code>GET /api/program/benchmarks?profile_id=</code></td><td><code>BenchmarkHistory</code>: per-day entries
+  (score, read/speak, wpm, fillers/min, confidence, structure, clarity), weekly averages, baseline, latest.</td></tr>
 </table>
-<pre><code>// GET /api/course?profile_id=&lt;id&gt; response (shape = CourseResponse)
-{
-  "title": str, "description": str, "target_score": float,
-  "units": [ { "id": str, "title": str, "description": str,
-               "lessons": [ { "id": str, "title": str, "focus": str, "tip": str,
-                              "reference_text": str, "example_words": [str],
-                              "progress": null | {            // null until attempted
-                                "status": "not_started"|"attempted"|"completed",
-                                "attempts": int, "best_score": float|null,
-                                "last_score": float|null,
-                                "last_practiced_at": str|null, "completed_at": str|null
-                              } } ] } ],
-  "summary": null | {                                          // present only with profile_id
-    "total_lessons": int, "completed_lessons": int, "attempted_lessons": int,
-    "percent_complete": float, "target_score": float
-  }
-}</code></pre>
-<p class="muted">Lesson <code>id</code>s are stable slugs (the progress key) — add lessons freely;
-renaming an id resets that lesson's history. Keep <code>schemas.py</code> and this section in lockstep.</p>
+<p class="muted">Field shapes are in <code>schemas.py</code> (ProgramResponse, BenchmarkHistory, SpeakingAssessment,
+ProgramAttempt). Day numbers and activity ids are progress keys — don't renumber them.</p>
 
-<!-- ============================================================= -->
 <h2 id="env">6. Environment & configuration</h2>
 <p>All config is read from <code>backend/.env</code> via <code>config.py</code>. Copy
 <code>.env.example</code> → <code>.env</code> and fill in as you reach each phase.</p>
@@ -272,14 +266,17 @@ renaming an id resets that lesson's history. Keep <code>schemas.py</code> and th
   <tr><td><code>LLM_PROVIDER</code></td><td>2</td><td>anthropic</td><td>"anthropic" or "openai"</td></tr>
   <tr><td><code>ANTHROPIC_API_KEY</code> / <code>ANTHROPIC_MODEL</code></td><td>2</td><td>— / claude-sonnet-4-6</td><td>Claude credentials</td></tr>
   <tr><td><code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code></td><td>2</td><td>— / gpt-4o</td><td>If swapping providers</td></tr>
-  <tr><td><code>AZURE_SPEECH_KEY</code> / <code>AZURE_SPEECH_REGION</code></td><td>3</td><td>—</td><td>Azure Speech resource</td></tr>
+  <tr><td><code>SAVE_RECORDINGS</code></td><td>3</td><td>false</td><td>Keep accent audio in <code>data/recordings/</code> (for <code>scripts/compare_providers.py</code>)</td></tr>
+  <tr><td><code>PRONUNCIATION_PROVIDER</code></td><td>3</td><td>local</td><td>"local" (on-device) or "azure"</td></tr>
+  <tr><td><code>PRONUNCIATION_MODEL</code> / <code>ESPEAK_VOICE</code></td><td>3</td><td>facebook/wav2vec2-lv-60-espeak-cv-ft / en-us</td><td>Local provider: phoneme model + reference accent</td></tr>
+  <tr><td><code>AZURE_SPEECH_KEY</code> / <code>AZURE_SPEECH_REGION</code></td><td>3</td><td>—</td><td>Azure Speech resource (if provider=azure)</td></tr>
 </table>
 
 <!-- ============================================================= -->
 <h2 id="setup">7. Local setup & run</h2>
 <h4>Prerequisites</h4>
 <pre><code># macOS
-brew install python@3.11 node ffmpeg</code></pre>
+brew install python@3.11 node ffmpeg espeak-ng</code></pre>
 <h4>Backend</h4>
 <pre><code>cd backend
 python3 -m venv .venv && source .venv/bin/activate
@@ -356,19 +353,38 @@ explanations, and clarity is scored with actionable rephrase tips.</p>
 </div>
 
 <!-- ============================================================= -->
-<h2 id="phase3">10. Phase 3 — American accent <span class="pill key">Azure key</span></h2>
+<h2 id="phase3">10. Phase 3 — American accent <span class="pill local">Local (Azure optional)</span></h2>
 <div class="panel phase">
 <p><strong>Outcome:</strong> In accent-practice mode, the user reads a reference sentence and gets
 overall + per-word + per-phoneme pronunciation scores, with problem words surfaced.</p>
-<h3>Implementation — <code>services/pronunciation.py</code></h3>
+<h3>Implementation — <code>services/pronunciation.py</code> (dispatch)</h3>
+<p><code>PRONUNCIATION_PROVIDER</code> selects the implementation; both return the same
+<code>AccentReport</code>. <code>is_available()</code> lets the router skip Phase 3 gracefully when
+the provider isn't set up.</p>
+<h4><code>pronunciation_local.py</code> — default, no key</h4>
+<ul>
+  <li>Expected phonemes: <code>espeak-ng --ipa --sep=_ -v en-us</code>, one word at a time.</li>
+  <li>Heard phonemes: wav2vec2 CTC model <code>facebook/wav2vec2-lv-60-espeak-cv-ft</code>
+  (trained on espeak's phoneme set, so the two line up); ~20ms frames, ~1.2 GB download on first use.</li>
+  <li>Accuracy: CTC forced alignment places each expected phoneme; its score is the model's
+  confidence in that phoneme at its aligned frames (GOP-style).</li>
+  <li>Completeness: greedy decode edit-aligned to the expected phonemes; a word with none heard is an
+  <code>Omission</code>. Fluency penalises inter-word pauses over 0.3s.
+  <code>pron_score = 0.6·accuracy + 0.2·fluency + 0.2·completeness</code>.</li>
+  <li>A word is a <code>Mispronunciation</code> if its accuracy is &lt;60 or any single phoneme is &lt;25.</li>
+</ul>
+<h4><code>pronunciation_azure.py</code> — <code>PRONUNCIATION_PROVIDER=azure</code></h4>
 <ul>
   <li>Create an Azure Speech resource; put key + region in <code>.env</code>.</li>
   <li>Transcode the uploaded webm to <strong>16kHz mono PCM WAV</strong> with ffmpeg (Azure requirement).</li>
   <li>Build <code>PronunciationAssessmentConfig(reference_text, GradingSystem.HundredMark,
   Granularity.Phoneme, enable_miscue=True)</code> and run recognition.</li>
-  <li>From <code>NBest[0].PronunciationAssessment</code> pull AccuracyScore / FluencyScore /
-  CompletenessScore / PronScore, plus per-word and per-phoneme scores.</li>
-  <li>Flag words with accuracy below a threshold (e.g. &lt;60) as <code>problem_words</code>.</li>
+  <li>Read the scores off <code>PronunciationAssessmentResult</code> (<code>accuracy_score</code>,
+  <code>fluency_score</code>, <code>completeness_score</code>, <code>pronunciation_score</code>, and
+  per-word / per-phoneme scores).</li>
+  <li>Flag words with accuracy below 60 (or with an error type) as <code>problem_words</code>.</li>
+</ul>
+<ul>
   <li>Frontend already has accent mode + reference textarea; replace the placeholder with a real
   sentence bank (categorize by the sounds non-native speakers find hard: th, r/l, v/w, vowel length).</li>
 </ul>

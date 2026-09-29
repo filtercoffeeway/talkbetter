@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 // Records mic audio with the browser MediaRecorder API and hands the
 // resulting Blob to onRecorded(blob). No external libraries needed.
-export default function Recorder({ onRecorded, disabled }) {
+// Optional `targetSeconds` shows a "0:42 / 1:30" goal and auto-stops 30 s past it.
+export default function Recorder({ onRecorded, disabled, targetSeconds }) {
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const mediaRecorderRef = useRef(null);
@@ -18,6 +19,10 @@ export default function Recorder({ onRecorded, disabled }) {
     }
     return () => clearInterval(timerRef.current);
   }, [recording]);
+
+  useEffect(() => {
+    if (recording && targetSeconds && elapsed >= targetSeconds + 30) stop();
+  }, [recording, elapsed, targetSeconds]);
 
   async function start() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -57,10 +62,19 @@ export default function Recorder({ onRecorded, disabled }) {
         <span className="recorder-timer">
           <span className="rec-dot" />
           {formatTime(elapsed)}
+          {targetSeconds ? (
+            <span className={elapsed >= targetSeconds ? "recorder-goal met" : "recorder-goal"}>
+              / {formatTime(targetSeconds)}
+            </span>
+          ) : null}
         </span>
       ) : (
         <span className="recorder-label">
-          {disabled ? "Please wait…" : "Tap to start recording"}
+          {disabled
+            ? "Please wait…"
+            : targetSeconds
+            ? `Tap to start · aim for ${formatTime(targetSeconds)}`
+            : "Tap to start recording"}
         </span>
       )}
     </div>

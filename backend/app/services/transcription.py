@@ -11,6 +11,11 @@ from app.models.schemas import Transcript, WordTiming
 
 _model: WhisperModel | None = None
 
+# Whisper is trained on cleaned-up subtitles, so it quietly drops "um"/"uh" —
+# exactly what filler tracking needs to see. A disfluent prompt nudges it to
+# transcribe verbatim.
+_VERBATIM_PROMPT = "Umm, so, uh, I was like, you know, hmm, thinking that, uh, we could"
+
 
 def _get_model() -> WhisperModel:
     global _model
@@ -36,6 +41,7 @@ def transcribe(audio_bytes: bytes, filename: str | None = None) -> Transcript:
             tmp_path,
             word_timestamps=True,
             vad_filter=True,
+            initial_prompt=_VERBATIM_PROMPT,
         )
         words: list[WordTiming] = []
         text_parts: list[str] = []

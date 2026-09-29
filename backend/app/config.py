@@ -20,20 +20,27 @@ class Settings(BaseSettings):
 
     # Persistence (Phase 4). Override with DB_PATH in .env if desired.
     db_path: Path = _REPO_ROOT / "data" / "talkbetter.db"
+    # Keep accent-practice audio (+ its sentence) for replay / provider comparison.
+    save_recordings: bool = False
+    recordings_dir: Path = _REPO_ROOT / "data" / "recordings"
 
     # Whisper (Phase 1)
-    whisper_model: str = "base"
+    whisper_model: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
 
     # LLM (Phase 2)
     llm_provider: str = "anthropic"          # "anthropic" | "openai"
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-haiku-4-5-20251001"
+    anthropic_model: str = "claude-sonnet-5-5"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
 
-    # Azure Pronunciation (Phase 3)
+    # Pronunciation / accent (Phase 3)
+    pronunciation_provider: str = "local"    # "local" | "azure"
+    # Local provider: wav2vec2 CTC model emitting espeak IPA phonemes
+    pronunciation_model: str = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+    espeak_voice: str = "en-us"              # reference pronunciation (American)
     azure_speech_key: str = ""
     azure_speech_region: str = ""
 

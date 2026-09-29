@@ -4,14 +4,13 @@ Uses Python's stdlib ``sqlite3`` only — no new dependencies (see spec.html
 Phase 4). The DB file lives at ``<repo>/data/talkbetter.db`` by default and is
 gitignored. Schema is created on first use via :func:`init_db`.
 
-Three tables:
+Tables:
   profiles         — one row per person sharing this local machine.
   sessions         — one row per analyzed recording, linked to a profile. We store
                      the headline metrics as columns (so history/charts are cheap to
                      query) plus the full AnalysisResponse JSON for replay/export.
-  lesson_progress  — one row per (profile, accent-course lesson): a profile's standing
-                     on a lesson (attempts, best score, completion). Lessons themselves
-                     are static content in services/course.py, not a DB table.
+  program_activity_results / benchmark_results — the 30-day program: per-activity
+                     standing, and the daily fixed benchmark (first take per day).
 """
 from __future__ import annotations
 
@@ -51,16 +50,40 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_profile_created
     ON sessions(profile_id, created_at);
 
-CREATE TABLE IF NOT EXISTS lesson_progress (
-    profile_id        INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    lesson_id         TEXT NOT NULL,                 -- slug from services/course.py
-    status            TEXT NOT NULL DEFAULT 'attempted',  -- 'attempted' | 'completed'
-    attempts          INTEGER NOT NULL DEFAULT 0,
-    best_score        REAL,                          -- best pron_score reached (nullable)
-    last_score        REAL,                          -- most recent attempt's pron_score
-    last_practiced_at TEXT NOT NULL DEFAULT (datetime('now')),
-    completed_at      TEXT,                          -- first time it crossed target score
-    PRIMARY KEY (profile_id, lesson_id)
+-- 30-day program (timestamps in local time, so "today" means your day).
+-- One row per (profile, program day, activity). Activities are
+-- static content in services/program_content.py; this is a profile's standing.
+CREATE TABLE IF NOT EXISTS program_activity_results (
+    profile_id      INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    day             INTEGER NOT NULL,              -- 1-30
+    activity_id     TEXT NOT NULL,                 -- stable id within the day
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    best_score      REAL,
+    last_score      REAL,
+    last_session_id INTEGER,
+    first_done_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    last_done_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (profile_id, day, activity_id)
+);
+
+-- 30-day program: the daily benchmark, the fixed-difficulty ground truth.
+-- Only the FIRST take of each part per day is kept (UNIQUE + INSERT OR IGNORE),
+-- so retakes can't inflate the trend.
+CREATE TABLE IF NOT EXISTS benchmark_results (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id          INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    day                 INTEGER NOT NULL,
+    part                TEXT NOT NULL,             -- 'read' | 'speak'
+    session_id          INTEGER,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    score               REAL,                      -- read: pron_score; speak: speaking composite
+    words_per_minute    REAL,
+    filler_rate_per_min REAL,
+    long_pauses         INTEGER,
+    confidence          INTEGER,
+    structure           INTEGER,
+    clarity             INTEGER,
+    UNIQUE (profile_id, day, part)
 );
 """
 

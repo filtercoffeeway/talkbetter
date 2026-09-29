@@ -19,6 +19,25 @@ from app.models.schemas import (
 
 
 @pytest.fixture(autouse=True)
+def isolate_from_local_env(tmp_path):
+    """Make tests independent of whoever's backend/.env is present.
+
+    Blank API keys (no real, paid API calls; results don't depend on which keys a
+    developer has) and never archive test uploads into the real data/recordings/.
+    Tests that need a key or recordings patch them back on.
+    """
+    with (
+        patch.object(settings, "anthropic_api_key", ""),
+        patch.object(settings, "openai_api_key", ""),
+        patch.object(settings, "azure_speech_key", ""),
+        patch.object(settings, "azure_speech_region", ""),
+        patch.object(settings, "save_recordings", False),
+        patch.object(settings, "recordings_dir", tmp_path / "recordings"),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def tmp_db(tmp_path):
     """Point the DB at a fresh temp file for every test."""
     db_file = tmp_path / "test.db"
